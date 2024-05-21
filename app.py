@@ -1,14 +1,18 @@
+import os
+from isort import file
 from matplotlib import ticker
 from numpy import real
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+import joblib
+
 from ta.volatility import BollingerBands
 from ta.trend import MACD, EMAIndicator, SMAIndicator
 from ta.momentum import RSIIndicator
 import datetime
 from datetime import date
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler,MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.neighbors import KNeighborsRegressor
@@ -17,7 +21,9 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.metrics import r2_score, mean_absolute_error
 from vnstock import listing_companies, stock_historical_data
-from RNN_predict import RNN
+from RNN import RNNRegressor
+from utils import *
+from LSTM import LSTM, predict_future
 
 st.title('Stock Price Predictions')
 st.sidebar.info('Welcome to the Stock Price Prediction App. Choose your options below')
@@ -27,7 +33,6 @@ def main():
     option = st.sidebar.selectbox('Make a choice', ['Visualize','Recent Data', 'Predict'])
     if option == 'Visualize':
         tech_indicators()
-        predict()
     elif option == 'Recent Data':
         dataframe()
     else:
@@ -64,12 +69,20 @@ end_date = end_date.strftime('%Y-%m-%d')
 data = stock_historical_data(symbol=option, start_date=start_date, end_date=end_date, resolution="1D", type="stock", beautify=True, decor=True, source='DNSE')
 # data = download_data(option, start_date, end_date)
 
-data['Change'][0] = 0
 data['Change'] = data['Close'].pct_change()
-data.to_csv('data.csv', index = False)
+data.iloc[0, data.columns.get_loc('Change')] = 0
+
+data = expand_data(data)
+
+ticker = option
+filename = option + '.csv'
+filename = os.path.join('Data', filename)
+data.to_csv(filename, index = False)
+
 scaler = StandardScaler()
 
 company_data = listing_companies(live=True)
+
 
 
 def tech_indicators():
@@ -120,35 +133,20 @@ def dataframe():
 
 
 def predict():
-    model = st.radio('Choose a model', ['LinearRegression', 'RandomForestRegressor', 'KNeighborsRegressor','RNN'])
+    model = st.radio('Choose a model', ['LinearRegression', 'RandomForestRegressor', 'KNeighborsRegressor', 'Tranformer','XGBRegressor'])
     num = st.number_input('How many days forecast?', value=5)
     num = int(num)
     if st.button('Predict'):
-        if model == 'LinearRegression':
-            engine = LinearRegression()
-            model_engine(engine, num)
-        elif model == 'RandomForestRegressor':
-            engine = RandomForestRegressor()
-            model_engine(engine, num)
-        elif model == 'ExtraTreesRegressor':
-            engine = ExtraTreesRegressor()
-            model_engine(engine, num)
-        elif model == 'KNeighborsRegressor':
-            engine = KNeighborsRegressor()
-            model_engine(engine, num)
-        elif model == 'RNN':
-            predict, real_price = RNN(data)
-        else:
-            engine = XGBRegressor()
-            model_engine(engine, num)
+        
+        model_engine( num, model)
 
-
-def model_engine(model, num):
+def model_engine( num, mode):
     # getting only the closing price
     df = data[['Close']]
     # shifting the closing price based on number of days forecast
     df['preds'] = data.Close.shift(-num)
     # scaling the data
+   
     x = df.drop(['preds'], axis=1).values
     x = scaler.fit_transform(x)
     # storing the last num_days data
@@ -161,12 +159,51 @@ def model_engine(model, num):
     y = y[:-num]
 
     #spliting the data
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=.2, random_state=7)
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=.02)
+    
+    if mode == 'LinearRegression':
+        model = LinearRegression()
+    elif mode == 'RandomForestRegressor':
+        model = RandomForestRegressor()
+    elif mode == 'ExtraTreesRegressor':
+        model = ExtraTreesRegressor()
+    elif mode == 'KNeighborsRegressor':
+        model = KNeighborsRegressor()
+    elif mode == 'RNN':
+        model = RNNRegressor(input_shape=(x_train.shape[1], 1))
+    # else:
+    #     model = XGBRegressor()
+
+    
     # training the model
-    model.fit(x_train, y_train)
-    preds = model.predict(x_test)
+    if mode == 'RNN':
+        model.train(x_train, y_train)
+        preds = model.predict(x_test)
+    elif mode == 'LTSM':
+        preds, y_test, model = LSTM(data)
+        future = predict_future(data, model)
+    else:
+        model.fit(x_train, y_train)
+        preds = model.predict(x_test)
+    
+    # saving the model
+    folder_path = os.path.join('Model', ticker)
+    
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    
+    model_name = mode +'.pkl'
+    model_name = os.path.join(folder_path, model_name)
+    joblib.dump(model, model_name)
+    
+    # visualizing the data
+    df = pd.DataFrame({'Actual': y_test, 'Predicted': preds})
+    st.line_chart(df)
+    
     st.text(f'r2_score: {r2_score(y_test, preds)} \
             \nMAE: {mean_absolute_error(y_test, preds)}')
+ 
+ 
     # predicting stock price based on the number of days
     forecast_pred = model.predict(x_forecast)
     day = 1
@@ -174,6 +211,8 @@ def model_engine(model, num):
         st.text(f'Day {day}: {i}')
         day += 1
 
+
+    
 
 if __name__ == '__main__':
     main()
