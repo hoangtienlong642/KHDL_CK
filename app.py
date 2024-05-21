@@ -27,7 +27,7 @@ from LSTM import LSTM, predict_future
 
 st.title('Stock Price Predictions')
 st.sidebar.info('Welcome to the Stock Price Prediction App. Choose your options below')
-st.sidebar.info("Created and designed by [Jonaben](https://www.linkedin.com/in/jonathan-ben-okah-7b507725b)")
+
 
 def main():
     option = st.sidebar.selectbox('Make a choice', ['Visualize','Recent Data', 'Predict'])
@@ -55,7 +55,7 @@ duration = st.sidebar.number_input('Enter the duration', value=3000)
 before = today - datetime.timedelta(days=duration)
 start_date = st.sidebar.date_input('Start Date', value=before)
 end_date = st.sidebar.date_input('End date', today)
-if st.sidebar.button('Send'):
+if st.sidebar.button('Comfirm'):
     if start_date < end_date:
         st.sidebar.success('Start date: `%s`\n\nEnd date: `%s`' %(start_date, end_date))
         download_data(option, start_date, end_date)
@@ -137,8 +137,11 @@ def predict():
     num = st.number_input('How many days forecast?', value=5)
     num = int(num)
     if st.button('Predict'):
-        
-        model_engine( num, model)
+        if os.path.exists(os.path.join('Model', ticker, model+'.pkl')):
+            model = joblib.load(os.path.join('Model', ticker, model+'.pkl'))
+            next_days(model,num)
+        else: 
+            model_engine( num, model)
 
 def model_engine( num, mode):
     # getting only the closing price
@@ -210,9 +213,41 @@ def model_engine( num, mode):
     for i in forecast_pred:
         st.text(f'Day {day}: {i}')
         day += 1
-
-
+def next_days(model,num):
     
+   # getting only the closing price
+    df = data[['Close']]
+    # shifting the closing price based on number of days forecast
+    df['preds'] = data.Close.shift(-num)
+    # scaling the data
+   
+    x = df.drop(['preds'], axis=1).values
+    x = scaler.fit_transform(x)
+    # storing the last num_days data
+    x_forecast = x[-num:]
+    # selecting the required values for training
+    x = x[:-num]
+    # getting the preds column
+    y = df.preds.values
+    # selecting the required values for training
+    y = y[:-num]
 
+    #spliting the data
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=.02)
+    preds = model.predict(x_test)
+    df = pd.DataFrame({'Actual': y_test, 'Predicted': preds})
+    st.line_chart(df)
+    
+    st.text(f'r2_score: {r2_score(y_test, preds)} \
+            \nMAE: {mean_absolute_error(y_test, preds)}')
+ 
+ 
+    # predicting stock price based on the number of days
+    forecast_pred = model.predict(x_forecast)
+    day = 1
+    for i in forecast_pred:
+        st.text(f'Day {day}: {i}')
+        day += 1
+    
 if __name__ == '__main__':
     main()
