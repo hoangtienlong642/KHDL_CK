@@ -19,11 +19,22 @@ from sklearn.neighbors import KNeighborsRegressor
 from xgboost import XGBRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import ExtraTreesRegressor
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 from vnstock import listing_companies, stock_historical_data
 from RNN import RNNRegressor
 from utils import *
 from LSTM import LSTM, predict_future
+from LSTM1 import LSTM1
+
+import torch
+import torch.nn as nn
+from torch.autograd import Variable
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
+
+from torch.utils.data import DataLoader, TensorDataset
+import torch.optim as optim
+import torch.nn.functional as F
 
 st.title('Stock Price Predictions')
 st.sidebar.info('Welcome to the Stock Price Prediction App. Choose your options below')
@@ -45,9 +56,11 @@ def download_data(op, start_date, end_date):
     df = yf.download(op, start=start_date, end=end_date, progress=False)
     return df
 
+company_data = listing_companies(live=True)
+cp_list = company_data['ticker'].tolist()
 
-
-option = st.sidebar.text_input('Enter a Stock Symbol', value='VIC')
+# option = st.sidebar.text_input('Enter a Stock Symbol', value='VIC')
+option = st.sidebar.selectbox('Enter a Stock Symbol', cp_list)
 option = option.upper()
 
 today = datetime.date.today()
@@ -81,13 +94,12 @@ data.to_csv(filename, index = False)
 
 scaler = StandardScaler()
 
-company_data = listing_companies(live=True)
 
 
 
 def tech_indicators():
     st.header('Technical Indicators')
-    option = st.radio('Choose a Technical Indicator to Visualize', ['Close', 'BB', 'MACD', 'RSI', 'SMA', 'EMA'])
+    option = st.radio('Choose a Technical Indicator to Visualize', ['Close - open', 'BB', 'MACD', 'RSI', 'SMA', 'EMA'])
 
     # Bollinger bands
     bb_indicator = BollingerBands(data.Close)
@@ -105,9 +117,10 @@ def tech_indicators():
     # EMA
     ema = EMAIndicator(data.Close).ema_indicator()
 
-    if option == 'Close':
+    if option == 'Close - open':
+        temp = data[['Close', 'Open']]
         st.write('Close Price')
-        st.line_chart(data.Close)
+        st.line_chart(temp)
     elif option == 'BB':
         st.write('BollingerBands')
         st.line_chart(bb)
@@ -133,15 +146,22 @@ def dataframe():
 
 
 def predict():
-    model = st.radio('Choose a model', ['LinearRegression', 'RandomForestRegressor', 'KNeighborsRegressor', 'Tranformer','XGBRegressor'])
+    mode = st.radio('Choose a model', ['LinearRegression', 'RandomForestRegressor', 'KNeighborsRegressor', 'LSTM'])
     num = st.number_input('How many days forecast?', value=5)
     num = int(num)
     if st.button('Predict'):
-        if os.path.exists(os.path.join('Model', ticker, model+'.pkl')):
-            model = joblib.load(os.path.join('Model', ticker, model+'.pkl'))
+        # if mode == 'LSTM':
+        #     if os.path.exists(os.path.join('Model', ticker, mode + '.pth')):
+                
+        #         temp = os.path.join('Model', ticker, mode + '.pth')
+        #         model = model.load_state_dict(torch.load(temp))
+        #         next_days(model,num)
+                
+        if os.path.exists(os.path.join('Model', ticker, mode + '.pkl')):
+            model = joblib.load(os.path.join('Model', ticker, mode + '.pkl'))
             next_days(model,num)
         else: 
-            model_engine( num, model)
+            model_engine( num, mode)
 
 def model_engine( num, mode):
     # getting only the closing price
@@ -168,51 +188,45 @@ def model_engine( num, mode):
         model = LinearRegression()
     elif mode == 'RandomForestRegressor':
         model = RandomForestRegressor()
-    elif mode == 'ExtraTreesRegressor':
-        model = ExtraTreesRegressor()
     elif mode == 'KNeighborsRegressor':
         model = KNeighborsRegressor()
-    elif mode == 'RNN':
-        model = RNNRegressor(input_shape=(x_train.shape[1], 1))
-    # else:
-    #     model = XGBRegressor()
 
     
     # training the model
-    if mode == 'RNN':
-        model.train(x_train, y_train)
-        preds = model.predict(x_test)
-    elif mode == 'LTSM':
-        preds, y_test, model = LSTM(data)
-        future = predict_future(data, model)
+
+    if mode == 'LSTM':
+        y_test, preds, model, forecast_pred = LSTM1(data,num  )
     else:
         model.fit(x_train, y_train)
         preds = model.predict(x_test)
+        forecast_pred = model.predict(x_forecast)
     
-    # saving the model
-    folder_path = os.path.join('Model', ticker)
-    
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    
-    model_name = mode +'.pkl'
-    model_name = os.path.join(folder_path, model_name)
-    joblib.dump(model, model_name)
-    
+        # saving the model
+        folder_path = os.path.join('Model', ticker)
+        
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        
+        model_name = mode +'.pkl'
+        model_name = os.path.join(folder_path, model_name)
+        joblib.dump(model, model_name)
+        
     # visualizing the data
     df = pd.DataFrame({'Actual': y_test, 'Predicted': preds})
     st.line_chart(df)
     
     st.text(f'r2_score: {r2_score(y_test, preds)} \
-            \nMAE: {mean_absolute_error(y_test, preds)}')
+            \nMAE: {mean_absolute_error(y_test, preds)} \
+            \nMSE: {mean_squared_error(y_test, preds)}')
  
  
     # predicting stock price based on the number of days
-    forecast_pred = model.predict(x_forecast)
+
     day = 1
     for i in forecast_pred:
         st.text(f'Day {day}: {i}')
         day += 1
+        
 def next_days(model,num):
     
    # getting only the closing price
@@ -239,8 +253,8 @@ def next_days(model,num):
     st.line_chart(df)
     
     st.text(f'r2_score: {r2_score(y_test, preds)} \
-            \nMAE: {mean_absolute_error(y_test, preds)}')
- 
+            \nMAE: {mean_absolute_error(y_test, preds)} \
+            \nMSE: {mean_squared_error(y_test, preds)}')
  
     # predicting stock price based on the number of days
     forecast_pred = model.predict(x_forecast)
