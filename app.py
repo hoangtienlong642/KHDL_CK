@@ -70,25 +70,26 @@ end_date = st.sidebar.date_input('End date', today)
 if st.sidebar.button('Comfirm'):
     if start_date < end_date:
         st.sidebar.success('Start date: `%s`\n\nEnd date: `%s`' %(start_date, end_date))
-        start_date = start_date.strftime('%Y-%m-%d')
-        end_date = end_date.strftime('%Y-%m-%d')
-
-
-        data = stock_historical_data(symbol=option, start_date=start_date, end_date=end_date, resolution="1D", type="stock", beautify=True, decor=True, source='DNSE')
-        # data = download_data(option, start_date, end_date)
-
-        data['Change'] = data['Close'].pct_change()
-        data.iloc[0, data.columns.get_loc('Change')] = 0
-
-        data = expand_data(data)
-
-        ticker = option
-        filename = option + '.csv'
-        filename = os.path.join('Data', filename)
-        data.to_csv(filename, index = False)
+       
     else:
         st.sidebar.error('Error: End date must fall after start date')
 
+start_date = start_date.strftime('%Y-%m-%d')
+end_date = end_date.strftime('%Y-%m-%d')
+
+
+data = stock_historical_data(symbol=option, start_date=start_date, end_date=end_date, resolution="1D", type="stock", beautify=True, decor=True, source='DNSE')
+# data = download_data(option, start_date, end_date)
+
+data['Change'] = data['Close'].pct_change()
+data.iloc[0, data.columns.get_loc('Change')] = 0
+
+data = expand_data(data)
+
+ticker = option
+filename = option + '.csv'
+filename = os.path.join('Data', filename)
+data.to_csv(filename, index = False)
 
 scaler = StandardScaler()
 
