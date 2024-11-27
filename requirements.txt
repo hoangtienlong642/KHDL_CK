@@ -5,3 +5,6 @@ ta
 xgboost
 vnstock
 torch
+bs4
+mathplotlib
+seaborn

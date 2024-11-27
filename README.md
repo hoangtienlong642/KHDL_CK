@@ -36,7 +36,7 @@ This application serves as a comprehensive tool for stock market data collection
 1. Run the application:
 
     ```bash
-    streamlit app.py
+    streamlit run app.py
     ```
 
     This will start the web application on your local machine.
